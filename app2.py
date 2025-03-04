@@ -1,10 +1,12 @@
 import openai
 import streamlit as st
 import pdfplumber
-import docx  # Corrected import
+import docx
 from pydantic import BaseModel
 from typing import List
-import re  # Import regex for module extraction
+import re
+from io import BytesIO
+from streamlit_quill import st_quill  # Rich text editor
 
 # Streamlit UI
 st.title("AI Compliance Training Script Generator")
@@ -17,37 +19,47 @@ if not openai_api_key:
     st.warning("Please enter your OpenAI API key to generate scripts.")
     st.stop()
 
-# Set OpenAI API Key
 openai.api_key = openai_api_key
 
 # File Upload Section
 st.subheader("Upload Course Outline (PDF, DOCX, TXT)")
-uploaded_files = st.file_uploader("Upload one or multiple course outlines", type=["pdf", "docx", "txt"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload multiple course outlines", type=["pdf", "docx", "txt"], accept_multiple_files=True)
 
 # User-defined module identifier
 st.subheader("Module Identifier")
-module_identifier = st.text_input("Enter your module identifier (e.g., 'Module', 'Section', 'Topic'):", value="Module")
+module_identifier = st.text_input("Enter module identifier (e.g., 'Module', 'Section', 'Topic'):", value="Module")
 
-# Function to extract text from a DOCX file
+# Function to extract formatted text from DOCX
 def extract_text_from_docx(docx_file):
     try:
         doc = docx.Document(docx_file)
-        return "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+        formatted_text = []
+        for para in doc.paragraphs:
+            style = para.style.name
+            text = para.text
+            if "Heading" in style:
+                formatted_text.append(f"**{text}**\n")
+            elif style.startswith("List"):
+                formatted_text.append(f"- {text}")
+            else:
+                formatted_text.append(text)
+        return "\n".join(formatted_text)
     except Exception as e:
         return f"Error extracting text from DOCX: {e}"
 
-# Function to extract text from a PDF file
+# Function to extract formatted text from PDF
 def extract_text_from_pdf(pdf_file):
     try:
         with pdfplumber.open(pdf_file) as pdf:
-            return "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+            return "\n\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
     except Exception as e:
         return f"Error extracting text from PDF: {e}"
 
-# Define Pydantic model for validation
+# Define Pydantic models
 class ModuleDetail(BaseModel):
     title: str
-    content: str  # Extracted structured content
+    content: str
+    custom_prompt: str  
 
 class CourseDetail(BaseModel):
     title: str
@@ -57,22 +69,18 @@ class CourseDetail(BaseModel):
     regulations: str
     modules: List[ModuleDetail]
 
-# Function to extract modules from text based on user-defined identifier
+# Function to extract modules with formatting
 def extract_modules_from_text(text, identifier):
     modules = []
-    
-    # Build regex pattern dynamically based on user input (case-insensitive)
     pattern = rf"\b{re.escape(identifier)}\s+\d+[:.-]?"
+    module_matches = re.split(pattern, text, flags=re.IGNORECASE)
 
-    module_matches = re.split(pattern, text, flags=re.IGNORECASE)  # Case-insensitive
-
-    if len(module_matches) > 1:  # Found multiple sections
-        for idx, section in enumerate(module_matches[1:], start=1):  # Skip the first split (before Module 1)
+    if len(module_matches) > 1:
+        for idx, section in enumerate(module_matches[1:], start=1):
             lines = section.strip().split("\n")
             module_title = lines[0].strip() if lines else f"{identifier} {idx} (Untitled)"
             module_content = "\n".join(lines[1:]).strip()
-            modules.append(ModuleDetail(title=module_title, content=module_content))
-
+            modules.append(ModuleDetail(title=module_title, content=module_content, custom_prompt=""))
     return modules
 
 # Extract content from uploaded documents
@@ -80,69 +88,62 @@ course_modules = []
 if uploaded_files:
     for file in uploaded_files:
         file_type = file.name.split(".")[-1]
-        
-        if file_type == "pdf":
-            extracted_text = extract_text_from_pdf(file)
-        elif file_type == "docx":
-            extracted_text = extract_text_from_docx(file)
-        else:
-            extracted_text = file.read().decode("utf-8")
+        extracted_text = extract_text_from_pdf(file) if file_type == "pdf" else extract_text_from_docx(file) if file_type == "docx" else file.read().decode("utf-8")
 
         if not extracted_text.strip():
             st.error(f"Could not extract text from {file.name}. Please check the file format.")
             continue
 
         st.text_area(f"Extracted Course Outline from {file.name}", extracted_text, height=300)
-        
-        # Detect modules using the user-defined identifier
         detected_modules = extract_modules_from_text(extracted_text, module_identifier)
 
         if detected_modules:
             course_modules.extend(detected_modules)
         else:
-            st.warning(f"No modules detected in {file.name} using '{module_identifier}'. Try a different identifier.")
+            st.warning(f"No modules detected in {file.name} using '{module_identifier}'.")
 
-# Course Metadata Input Fields
+# Course Metadata Inputs
 st.subheader("Course Metadata")
 title = st.text_input("Course Title:", placeholder="e.g., 2025 Compliance Essentials for RIAs – Annual Training")
-description = st.text_area("Course Description:", placeholder="Provide a brief description of the course objectives and target audience.")
+description = st.text_area("Course Description:", placeholder="Provide a brief course summary.")
 duration = st.number_input("Course Duration (minutes):", min_value=1, step=1, value=30)
 audience = st.selectbox("Intended Audience:", ["RIA Employees", "Compliance Officers", "Investment Advisers", "General Finance Professionals"])
 regulations = st.selectbox("Regulatory Alignment:", ["SEC", "FINRA", "Investment Advisers Act of 1940", "Multiple"])
 
-# Function to generate a module script based on the structured outline
+# Function to generate module script
 def generate_module_script(module: ModuleDetail, module_number: int) -> str:
     try:
-        prompt = f"""
-        Expand {module_identifier} {module_number} of a compliance training course on "{module.title}".  
-        The module should be 700-1,000 words and include:  
+        base_prompt = f"""
+        Expand {module_identifier} {module_number} on "{module.title}" in compliance training.
+        The module should be 700-1,000 words and include:
 
-        **Learning Objectives:**  
-        - Clearly define the compliance issue.  
-        - Provide practical applications and key takeaways.  
+        **Learning Objectives:**
+        - Define the compliance issue.
+        - Provide practical applications.
 
-        **Content:**  
-        - Overview of the compliance issue.  
-        - Key regulatory requirements and industry best practices.  
-        - Case study illustrating real-world application.  
+        **Content:**
+        - Overview of the compliance issue.
+        - Key regulatory requirements and best practices.
+        - Case study illustrating real-world application.
 
-        **Scenario-Based Learning Activity:**  
-        - Provide a practical scenario related to "{module.title}".  
+        **Scenario-Based Learning Activity:**
+        - Provide a scenario related to "{module.title}".
 
-        **Regulatory References:**  
-        - Cite SEC, FINRA, or other applicable regulations.  
-
-        Follow the extracted content strictly without adding unrelated information:  
+        **Regulatory References:**
+        - Cite SEC, FINRA, or applicable regulations.
 
         {module.content}
         """
+        
+        # Allow users to override prompt
+        prompt = module.custom_prompt if module.custom_prompt else base_prompt
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
-            messages=[{"role": "system", "content": "You are an expert in compliance training content generation."},
+            messages=[{"role": "system", "content": "You are an expert in compliance training script generation."},
                       {"role": "user", "content": prompt}],
             max_tokens=2000,
-            temperature=0.2  # Lower temperature for consistency
+            temperature=0.2
         )
 
         return response["choices"][0]["message"]["content"].strip()
@@ -155,27 +156,24 @@ if st.button("Generate Training Script"):
     if not title or not description or not audience or not regulations or not course_modules:
         st.warning("Please fill in all fields before generating the script!")
     else:
-        try:
-            course = CourseDetail(
-                title=title,
-                description=description,
-                duration_minutes=duration,
-                audience=audience,
-                regulations=regulations,
-                modules=course_modules
-            )
+        full_script = ""
+        for idx, module in enumerate(course_modules, start=1):
+            with st.spinner(f"Generating {module_identifier} {idx}: {module.title}..."):
+                module_script = generate_module_script(module, idx)
+                full_script += module_script + "\n\n"
 
-            st.subheader("Generated Compliance Training Script")
-            
-            full_script = ""
-            for idx, module in enumerate(course.modules, start=1):
-                with st.spinner(f"Generating {module_identifier} {idx}: {module.title}..."):
-                    module_script = generate_module_script(module, idx)
-                    full_script += module_script + "\n\n"
-                    st.markdown(module_script, unsafe_allow_html=True)
+        st.subheader("Final Script with Editing")
+        final_script = st_quill(value=full_script, key="final_script")
 
-            edited_script = st.text_area("Edit Your Script Before Exporting", full_script, height=400)
-            st.download_button("Download Full Script", data=edited_script, file_name="compliance_training_script.txt", mime="text/plain")
+        # Export as Word Document
+        if st.button("Download as DOCX"):
+            doc = docx.Document()
+            doc.add_paragraph(final_script)
+            buffer = BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            st.download_button("Download DOCX", data=buffer, file_name="compliance_training_script.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-        except Exception as e:
-            st.error(f"Failed to generate script: {e}")
+        # Export as HTML (For LMS integration)
+        if st.button("Download as HTML"):
+            st.download_button("Download HTML", data=final_script, file_name="compliance_training_script.html", mime="text/html")
