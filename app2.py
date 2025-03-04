@@ -2,11 +2,12 @@ import openai
 import streamlit as st
 import pdfplumber
 import docx
+from io import BytesIO
 from pydantic import BaseModel
 from typing import List
 import re
-from io import BytesIO
-from streamlit_quill import st_quill  # Rich text editor
+from streamlit_quill import st_quill  # Rich text editor for formatting
+from bs4 import BeautifulSoup  # Helps preserve HTML-based formatting
 
 # Streamlit UI
 st.title("AI Compliance Training Script Generator")
@@ -22,28 +23,32 @@ if not openai_api_key:
 openai.api_key = openai_api_key
 
 # File Upload Section
-st.subheader("Upload Course Outline (PDF, DOCX, TXT)")
-uploaded_files = st.file_uploader("Upload multiple course outlines", type=["pdf", "docx", "txt"], accept_multiple_files=True)
+st.subheader("Upload Course Outline (PDF, DOCX)")
+uploaded_files = st.file_uploader("Upload multiple course outlines", type=["pdf", "docx"], accept_multiple_files=True)
 
 # User-defined module identifier
 st.subheader("Module Identifier")
-module_identifier = st.text_input("Enter module identifier (e.g., 'Module', 'Section', 'Topic'):", value="Module")
+module_identifier = st.text_input("Enter module identifier (e.g., 'Module', 'Section'):", value="Module")
 
-# Function to extract formatted text from DOCX
+# Function to extract text while preserving styles from DOCX
 def extract_text_from_docx(docx_file):
     try:
         doc = docx.Document(docx_file)
-        formatted_text = []
+        html_content = []
         for para in doc.paragraphs:
-            style = para.style.name
             text = para.text
+            style = para.style.name
+
             if "Heading" in style:
-                formatted_text.append(f"**{text}**\n")
-            elif style.startswith("List"):
-                formatted_text.append(f"- {text}")
+                html_content.append(f"<h2>{text}</h2>")
+            elif style.startswith("List") or para.text.startswith(("-", "•", "*")):
+                html_content.append(f"<li>{text}</li>")
+            elif "Bold" in style or "**" in text:
+                html_content.append(f"<b>{text}</b>")
             else:
-                formatted_text.append(text)
-        return "\n".join(formatted_text)
+                html_content.append(f"<p>{text}</p>")
+        
+        return "\n".join(html_content)
     except Exception as e:
         return f"Error extracting text from DOCX: {e}"
 
@@ -51,7 +56,12 @@ def extract_text_from_docx(docx_file):
 def extract_text_from_pdf(pdf_file):
     try:
         with pdfplumber.open(pdf_file) as pdf:
-            return "\n\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+            formatted_text = []
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    formatted_text.append(f"<p>{text.replace('\n', '<br>')}</p>")  # Preserve line breaks
+            return "\n".join(formatted_text)
     except Exception as e:
         return f"Error extracting text from PDF: {e}"
 
@@ -69,7 +79,7 @@ class CourseDetail(BaseModel):
     regulations: str
     modules: List[ModuleDetail]
 
-# Function to extract modules with formatting
+# Function to extract modules while keeping formatting
 def extract_modules_from_text(text, identifier):
     modules = []
     pattern = rf"\b{re.escape(identifier)}\s+\d+[:.-]?"
@@ -85,6 +95,8 @@ def extract_modules_from_text(text, identifier):
 
 # Extract content from uploaded documents
 course_modules = []
+extracted_texts = {}
+
 if uploaded_files:
     for file in uploaded_files:
         file_type = file.name.split(".")[-1]
@@ -94,9 +106,12 @@ if uploaded_files:
             st.error(f"Could not extract text from {file.name}. Please check the file format.")
             continue
 
-        st.text_area(f"Extracted Course Outline from {file.name}", extracted_text, height=300)
-        detected_modules = extract_modules_from_text(extracted_text, module_identifier)
+        extracted_texts[file.name] = extracted_text  # Store for Quill Editor
 
+        # Display extracted text with Quill Editor
+        extracted_texts[file.name] = st_quill(value=extracted_text, key=f"extracted_{file.name}")
+
+        detected_modules = extract_modules_from_text(extracted_text, module_identifier)
         if detected_modules:
             course_modules.extend(detected_modules)
         else:
@@ -135,7 +150,6 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
         {module.content}
         """
         
-        # Allow users to override prompt
         prompt = module.custom_prompt if module.custom_prompt else base_prompt
 
         response = openai.ChatCompletion.create(
@@ -162,18 +176,7 @@ if st.button("Generate Training Script"):
                 module_script = generate_module_script(module, idx)
                 full_script += module_script + "\n\n"
 
+        # Display final script with Quill Editor
         st.subheader("Final Script with Editing")
         final_script = st_quill(value=full_script, key="final_script")
 
-        # Export as Word Document
-        if st.button("Download as DOCX"):
-            doc = docx.Document()
-            doc.add_paragraph(final_script)
-            buffer = BytesIO()
-            doc.save(buffer)
-            buffer.seek(0)
-            st.download_button("Download DOCX", data=buffer, file_name="compliance_training_script.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-
-        # Export as HTML (For LMS integration)
-        if st.button("Download as HTML"):
-            st.download_button("Download HTML", data=final_script, file_name="compliance_training_script.html", mime="text/html")
