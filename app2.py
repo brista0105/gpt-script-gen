@@ -2,18 +2,21 @@ import openai
 import streamlit as st
 from pydantic import BaseModel
 from typing import List
-import os
-from dotenv import load_dotenv
 
-# Load API key securely
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+# Streamlit UI
+st.title("AI Compliance Training Script Generator")
 
-# Ensure API key is available
-if not OPENAI_API_KEY:
-    st.error("Missing OpenAI API key. Set it in .env file or Streamlit secrets.")
+# User Input for OpenAI API Key
+st.subheader("OpenAI API Key")
+openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password", placeholder="sk-...", key="api_key")
+
+# Ensure API key is entered before proceeding
+if not openai_api_key:
+    st.warning("Please enter your OpenAI API key to generate scripts.")
     st.stop()
+
+# Set OpenAI API Key
+openai.api_key = openai_api_key
 
 # Define Pydantic model for course details validation
 class ModuleDetail(BaseModel):
@@ -64,13 +67,10 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
     except Exception as e:
         return f"Error generating module {module_number}: {e}"
 
-# Streamlit UI
-st.title("AI Compliance Training Script Generator")
-
-# Course Title with Placeholder
+# Course Title
 title = st.text_input("Course Title:", placeholder="e.g., 2025 Compliance Essentials for RIAs – Annual Training")
 
-# Course Description with Placeholder
+# Course Description
 description = st.text_area("Course Description:", placeholder="Provide a brief description of the course objectives and target audience.")
 
 # Course Duration
@@ -79,7 +79,7 @@ duration = st.number_input("Course Duration (minutes):", min_value=1, step=1, va
 # Intended Audience
 audience = st.selectbox("Intended Audience:", ["RIA Employees", "Compliance Officers", "Investment Advisers", "General Finance Professionals"])
 
-# Regulatory Alignment Dropdown
+# Regulatory Alignment
 regulations = st.selectbox("Regulatory Alignment:", ["SEC", "FINRA", "Investment Advisers Act of 1940", "Multiple"])
 
 # Module Management
