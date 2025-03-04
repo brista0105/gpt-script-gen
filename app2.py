@@ -116,13 +116,23 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
         prompt = f"""
         Expand {module_identifier} {module_number} of a compliance training course on "{module.title}".  
         The module should be 700-1,000 words and include:  
-        - A clear definition of the compliance issue.  
-        - A practical example or real-world case study relevant to "{module.title}".  
-        - A scenario-based learning activity that engages learners in decision-making.  
-        - A summary of best practices and regulatory requirements, referencing SEC rules or relevant laws.  
-        - Learning Objectives: Include at least two key takeaways learners should gain from this module.  
-        - Regulatory References: Cite specific SEC or FINRA regulations where applicable.  
-        - Format the output as a structured training module based strictly on this content:  
+
+        **Learning Objectives:**  
+        - Clearly define the compliance issue.  
+        - Provide practical applications and key takeaways.  
+
+        **Content:**  
+        - Overview of the compliance issue.  
+        - Key regulatory requirements and industry best practices.  
+        - Case study illustrating real-world application.  
+
+        **Scenario-Based Learning Activity:**  
+        - Provide a practical scenario related to "{module.title}".  
+
+        **Regulatory References:**  
+        - Cite SEC, FINRA, or other applicable regulations.  
+
+        Follow the extracted content strictly without adding unrelated information:  
 
         {module.content}
         """
@@ -132,7 +142,7 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
             messages=[{"role": "system", "content": "You are an expert in compliance training content generation."},
                       {"role": "user", "content": prompt}],
             max_tokens=2000,
-            temperature=0.3  # Lower temperature for strict adherence
+            temperature=0.2  # Lower temperature for consistency
         )
 
         return response["choices"][0]["message"]["content"].strip()
@@ -157,7 +167,6 @@ if st.button("Generate Training Script"):
 
             st.subheader("Generated Compliance Training Script")
             
-            # Generate content for each module
             full_script = ""
             for idx, module in enumerate(course.modules, start=1):
                 with st.spinner(f"Generating {module_identifier} {idx}: {module.title}..."):
@@ -165,10 +174,7 @@ if st.button("Generate Training Script"):
                     full_script += module_script + "\n\n"
                     st.markdown(module_script, unsafe_allow_html=True)
 
-            # Provide option to edit script
             edited_script = st.text_area("Edit Your Script Before Exporting", full_script, height=400)
-
-            # Provide option to download script as a text file
             st.download_button("Download Full Script", data=edited_script, file_name="compliance_training_script.txt", mime="text/plain")
 
         except Exception as e:
