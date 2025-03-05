@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.tiny.cloud/1/go7hexdpzwfnrk8rq5r79focjct84oec50gj60ua08z63vdz/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+</head>
+<body>
+    <textarea id="editor">{{EXTRACTED_TEXT}}</textarea>
+    
+    <script>
+        tinymce.init({
+            selector: '#editor',
+            height: 500,
+            plugins: 'lists advlist autolink link image charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table help wordcount',
+            toolbar: 'undo redo | formatselect | bold italic underline backcolor | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | removeformat | help',
+            setup: function(editor) {
+                editor.on('init', function () {
+                    editor.setContent(document.getElementById("editor").innerText); // Load extracted text
+                });
+
+                editor.on('change', function () {
+                    window.parent.postMessage(editor.getContent(), "*");
+                });
+            }
+        });
+    </script>
+</body>
+</html>

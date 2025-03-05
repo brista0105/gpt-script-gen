@@ -7,9 +7,6 @@ from pydantic import BaseModel
 from typing import List
 import re
 import markdown
-from io import BytesIO
-from docx import Document
-from xhtml2pdf import pisa
 
 # Streamlit UI
 st.title("AI Compliance Training Script Generator")
@@ -145,52 +142,26 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
     except Exception as e:
         return f"Error generating {module_identifier} {module_number}: {e}"
 
-# Function to convert HTML to DOCX and return binary data
-def html_to_docx(html_content):
-    doc = Document()
-    doc.add_heading('Compliance Training Script', 0)
-    doc.add_paragraph(html_content, style='BodyText')
-    docx_buffer = BytesIO()
-    doc.save(docx_buffer)
-    docx_buffer.seek(0)
-    return docx_buffer.getvalue()
-
-# Function to convert HTML to PDF
-def html_to_pdf(html_content):
-    pdf_buffer = BytesIO()
-    pisa.CreatePDF(BytesIO(html_content.encode('utf-8')), dest=pdf_buffer)
-    return pdf_buffer
-
-# CKEditor Function with content capture
-def ckeditor(md_text):
+# TinyMCE Editor Function
+def tiny_editor(md_text):
     html_content = markdown.markdown(md_text)  # Convert Markdown to HTML
-    ckeditor_html = f"""
+    tiny_html = f"""
     <head>
-        <script src="https://cdn.ckeditor.com/4.22.1/full/ckeditor.js"></script>
+        <script src="https://cdn.tiny.cloud/1/go7hexdpzwfnrk8rq5r79focjct84oec50gj60ua08z63vdz/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
     </head>
     <body>
-        <textarea id="editor">{html_content}</textarea>
+        <textarea id="tiny_editor">{html_content}</textarea>
         <script>
-            CKEDITOR.replace('editor', {{
-                extraPlugins: 'exportpdf',
-                toolbar: [
-                    ['Save', 'Print', '-', 'Undo', 'Redo'],
-                    ['Bold', 'Italic', 'Underline', 'Strike'],
-                    ['NumberedList', 'BulletedList'],
-                    ['Link', 'Unlink'],
-                    ['ExportPdf', 'Source']
-                ],
-                removeButtons: ''
-            }});
-
-            // Function to handle Save
-            CKEDITOR.instances.editor.on('save', function(evt) {{
-                alert('Content saved inside CKEditor. Use export options to download.');
+            tinymce.init({{
+                selector: '#tiny_editor',
+                height: 400,
+                plugins: 'advlist autolink lists link charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table paste help wordcount',
+                toolbar: 'undo redo | formatselect | bold italic | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | removeformat | help'
             }});
         </script>
     </body>
     """
-    components.html(ckeditor_html, height=500)
+    components.html(tiny_html, height=500)
 
 # Generate Training Script Button
 if st.button("Generate Training Script"):
@@ -204,4 +175,12 @@ if st.button("Generate Training Script"):
                 full_script += module_script + "\n\n"
 
         st.subheader("Edit Your Script Before Exporting")
-        ckeditor(full_script)  # Convert Markdown to HTML
+        tiny_editor(full_script)  # Convert Markdown to HTML
+
+        # Download Button
+        st.download_button(
+            "Download Full Script",
+            data=full_script,
+            file_name="compliance_script.html",
+            mime="text/html"
+        )
