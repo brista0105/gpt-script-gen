@@ -86,9 +86,9 @@ if uploaded_files:
             continue
 
         st.text_area(f"Extracted Course Outline from {file.name}", extracted_text, height=300)
-        detected_modules = extract_modules_from_text(extracted_text, module_identifier)
-
-        if detected_modules:
+        if detected_modules := extract_modules_from_text(
+            extracted_text, module_identifier
+        ):
             course_modules.extend(detected_modules)
         else:
             st.warning(f"No modules detected in {file.name} using '{module_identifier}'.")
@@ -127,7 +127,7 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
         """
 
         # Allow users to override prompt
-        prompt = module.custom_prompt if module.custom_prompt else base_prompt
+        prompt = module.custom_prompt or base_prompt
 
         response = openai.ChatCompletion.create(
             model="gpt-4",

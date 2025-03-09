@@ -126,6 +126,9 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
         **Regulatory References:**
         - Cite SEC, FINRA, or applicable regulations.
 
+        **Duration:**
+        - This module should take approximately {duration} minutes to complete.
+
         {module.content}
         """
 
@@ -192,16 +195,55 @@ def ckeditor(md_text):
     """
     components.html(ckeditor_html, height=500)
 
+# Function to generate detailed storyboard
+def generate_detailed_storyboard(module: ModuleDetail, module_number: int) -> str:
+    storyboard_prompt = f"""
+    Create a detailed storyboard for an eLearning course based on the provided course outline. The storyboard should include slide-by-slide visuals and descriptions that align with each module's learning objectives.
+
+    For each module and topic, include the following:
+
+    1. Slide Number and Title – A concise title summarizing the slide content.
+    2. Visual Description – Describe the imagery, animations, or graphics that should appear.
+    3. Text Overlay – Key messages or text elements displayed on the slide.
+    4. Interactive Elements (if applicable) – Any animations, checklists, flowcharts, quizzes, or case studies.
+
+    Ensure the storyboard is engaging, visually structured, and aligns with compliance training best practices. Include case study highlights, real-world examples, infographics, and animations where relevant.
+
+    Module {module_number}: {module.title}
+    {module.content}
+    """
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are an expert in eLearning storyboard creation."},
+                      {"role": "user", "content": storyboard_prompt}],
+            max_tokens=2000,
+            temperature=0.2
+        )
+
+        storyboard = response["choices"][0]["message"]["content"].strip()
+        return f"Module {module_number}: {module.title}\n\n{storyboard}"
+
+    except Exception as e:
+        return f"Error generating detailed storyboard for {module_identifier} {module_number}: {e}"
+
 # Generate Training Script Button
 if st.button("Generate Training Script"):
     if not title or not description or not audience or not regulations or not course_modules:
         st.warning("Please fill in all fields before generating the script!")
     else:
         full_script = ""
+        full_storyboard = ""
         for idx, module in enumerate(course_modules, start=1):
             with st.spinner(f"Generating {module_identifier} {idx}: {module.title}..."):
                 module_script = generate_module_script(module, idx)
+                module_storyboard = generate_detailed_storyboard(module, idx)
                 full_script += module_script + "\n\n"
+                full_storyboard += module_storyboard + "\n\n"
 
         st.subheader("Edit Your Script Before Exporting")
         ckeditor(full_script)  # Convert Markdown to HTML
+
+        st.subheader("Detailed Storyboard")
+        st.text_area("Generated Detailed Storyboard", full_storyboard, height=300)
