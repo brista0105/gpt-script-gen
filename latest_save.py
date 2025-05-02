@@ -7,6 +7,9 @@ from pydantic import BaseModel
 from typing import List
 import re
 import markdown
+from io import BytesIO
+from docx import Document
+from xhtml2pdf import pisa
 
 # Streamlit UI
 st.title("AI Compliance Training Script Generator")
@@ -86,9 +89,9 @@ if uploaded_files:
             continue
 
         st.text_area(f"Extracted Course Outline from {file.name}", extracted_text, height=300)
-        if detected_modules := extract_modules_from_text(
-            extracted_text, module_identifier
-        ):
+        detected_modules = extract_modules_from_text(extracted_text, module_identifier)
+
+        if detected_modules:
             course_modules.extend(detected_modules)
         else:
             st.warning(f"No modules detected in {file.name} using '{module_identifier}'.")
@@ -123,11 +126,14 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
         **Regulatory References:**
         - Cite SEC, FINRA, or applicable regulations.
 
+        **Duration:**
+        - This module should take approximately {duration} minutes to complete.
+
         {module.content}
         """
 
         # Allow users to override prompt
-        prompt = module.custom_prompt or base_prompt
+        prompt = module.custom_prompt if module.custom_prompt else base_prompt
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
@@ -142,26 +148,85 @@ def generate_module_script(module: ModuleDetail, module_number: int) -> str:
     except Exception as e:
         return f"Error generating {module_identifier} {module_number}: {e}"
 
-# TinyMCE Editor Function
-def tiny_editor(md_text):
+# Function to convert HTML to DOCX and return binary data
+def html_to_docx(html_content):
+    doc = Document()
+    doc.add_heading('Compliance Training Script', 0)
+    doc.add_paragraph(html_content, style='BodyText')
+    docx_buffer = BytesIO()
+    doc.save(docx_buffer)
+    docx_buffer.seek(0)
+    return docx_buffer.getvalue()
+
+# Function to convert HTML to PDF
+def html_to_pdf(html_content):
+    pdf_buffer = BytesIO()
+    pisa.CreatePDF(BytesIO(html_content.encode('utf-8')), dest=pdf_buffer)
+    return pdf_buffer
+
+# CKEditor Function with content capture
+def ckeditor(md_text):
     html_content = markdown.markdown(md_text)  # Convert Markdown to HTML
-    tiny_html = f"""
+    ckeditor_html = f"""
     <head>
-        <script src="https://cdn.tiny.cloud/1/go7hexdpzwfnrk8rq5r79focjct84oec50gj60ua08z63vdz/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+        <script src="https://cdn.ckeditor.com/4.22.1/full/ckeditor.js"></script>
     </head>
     <body>
-        <textarea id="tiny_editor">{html_content}</textarea>
+        <textarea id="editor">{html_content}</textarea>
         <script>
-            tinymce.init({{
-                selector: '#tiny_editor',
-                height: 400,
-                plugins: 'advlist autolink lists link charmap print preview anchor searchreplace visualblocks code fullscreen insertdatetime media table paste help wordcount',
-                toolbar: 'undo redo | formatselect | bold italic | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | removeformat | help'
+            CKEDITOR.replace('editor', {{
+                extraPlugins: 'exportpdf',
+                toolbar: [
+                    ['Save', 'Print', '-', 'Undo', 'Redo'],
+                    ['Bold', 'Italic', 'Underline', 'Strike'],
+                    ['NumberedList', 'BulletedList'],
+                    ['Link', 'Unlink'],
+                    ['ExportPdf', 'Source']
+                ],
+                removeButtons: ''
+            }});
+
+            // Function to handle Save
+            CKEDITOR.instances.editor.on('save', function(evt) {{
+                alert('Content saved inside CKEditor. Use export options to download.');
             }});
         </script>
     </body>
     """
-    components.html(tiny_html, height=500)
+    components.html(ckeditor_html, height=500)
+
+# Function to generate detailed storyboard
+def generate_detailed_storyboard(module: ModuleDetail, module_number: int) -> str:
+    storyboard_prompt = f"""
+    Create a detailed storyboard for an eLearning course based on the provided course outline. The storyboard should include slide-by-slide visuals and descriptions that align with each module's learning objectives.
+
+    For each module and topic, include the following:
+
+    1. Slide Number and Title – A concise title summarizing the slide content.
+    2. Visual Description – Describe the imagery, animations, or graphics that should appear.
+    3. Text Overlay – Key messages or text elements displayed on the slide.
+    4. Interactive Elements (if applicable) – Any animations, checklists, flowcharts, quizzes, or case studies.
+
+    Ensure the storyboard is engaging, visually structured, and aligns with compliance training best practices. Include case study highlights, real-world examples, infographics, and animations where relevant.
+
+    Module {module_number}: {module.title}
+    {module.content}
+    """
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are an expert in eLearning storyboard creation."},
+                      {"role": "user", "content": storyboard_prompt}],
+            max_tokens=2000,
+            temperature=0.2
+        )
+
+        storyboard = response["choices"][0]["message"]["content"].strip()
+        return f"Module {module_number}: {module.title}\n\n{storyboard}"
+
+    except Exception as e:
+        return f"Error generating detailed storyboard for {module_identifier} {module_number}: {e}"
 
 # Generate Training Script Button
 if st.button("Generate Training Script"):
@@ -169,18 +234,16 @@ if st.button("Generate Training Script"):
         st.warning("Please fill in all fields before generating the script!")
     else:
         full_script = ""
+        full_storyboard = ""
         for idx, module in enumerate(course_modules, start=1):
             with st.spinner(f"Generating {module_identifier} {idx}: {module.title}..."):
                 module_script = generate_module_script(module, idx)
+                module_storyboard = generate_detailed_storyboard(module, idx)
                 full_script += module_script + "\n\n"
+                full_storyboard += module_storyboard + "\n\n"
 
         st.subheader("Edit Your Script Before Exporting")
-        tiny_editor(full_script)  # Convert Markdown to HTML
+        ckeditor(full_script)  # Convert Markdown to HTML
 
-        # Download Button
-        st.download_button(
-            "Download Full Script",
-            data=full_script,
-            file_name="compliance_script.html",
-            mime="text/html"
-        )
+        st.subheader("Detailed Storyboard")
+        st.text_area("Generated Detailed Storyboard", full_storyboard, height=300)

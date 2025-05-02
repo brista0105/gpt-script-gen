@@ -14,9 +14,10 @@ from xhtml2pdf import pisa
 # Streamlit UI
 st.title("AI Compliance Training Script Generator")
 
-# User Input for OpenAI API Key
-st.subheader("OpenAI API Key")
-openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password", placeholder="sk-...", key="api_key")
+# Sidebar for OpenAI API Key
+with st.sidebar:
+    st.subheader("OpenAI API Key")
+    openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password", placeholder="sk-...", key="api_key")
 
 if not openai_api_key:
     st.warning("Please enter your OpenAI API key to generate scripts.")
